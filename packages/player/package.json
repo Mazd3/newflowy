@@ -1,0 +1,22 @@
+{
+  "name": "player",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'Add dev script here'",
+    "build": "echo 'Add build script here'",
+    "test": "echo 'Add test script here'",
+    "lint": "echo 'Add lint script here'"
+  },
+  "dependencies": {
+    "@types/node": "^20.8.9",
+    "discord-api-types": "^0.37.62",
+    "eslint-config-custom": "workspace:*",
+    "tsconfig": "workspace:*",
+    "typescript": "^5.2.2",
+    "yasha": "github:davidzeng0/yasha#dist"
+  },
+  "devDependencies": {
+    "discord.js": "^14.13.0"
+  }
+}

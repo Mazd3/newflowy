@@ -1,0 +1,25 @@
+{
+  "name": "discord-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nodemon --exec \"node -r esbuild-register ./src/index.ts\" -e .ts",
+    "build": "echo 'Add build script here'",
+    "test": "echo 'Add test script here'",
+    "lint": "echo 'Add lint script here'"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.9",
+    "discord-api-types": "^0.37.62",
+    "esbuild-register": "^3.5.0",
+    "eslint-config-custom": "workspace:*",
+    "nodemon": "^3.0.1",
+    "tsconfig": "workspace:*",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "discord.js": "^14.13.0",
+    "yasha": "github:davidzeng0/yasha#dist",
+    "player": "workspace:*"
+  }
+}
