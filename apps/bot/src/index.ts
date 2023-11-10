@@ -6,11 +6,18 @@
 
 import { Client, Events, GatewayIntentBits } from 'discord.js'
 import { Source, TrackPlayer, VoiceConnection } from 'yasha'
-import { Music } from 'player'
+import { Player } from 'player'
 
 // Create a new client instance
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildWebhooks, GatewayIntentBits.GuildVoiceStates],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildWebhooks,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.DirectMessages,
+    'MessageContent',
+  ],
 })
 
 // When the client is ready, run this code (only once)
@@ -53,7 +60,7 @@ client.on('debug', (data) => {
 //   player.start()
 // })
 
-const player = new Music(client, {})
+const player = new Player(client, {})
 
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return
@@ -64,4 +71,13 @@ client.on('interactionCreate', async (interaction) => {
   const connection = await player.newPlayer(interaction.guild!, channel, interaction.channelId!)
 
   connection.play(await Source.Spotify.get('6xAqnAdhn75F80Ock2U52Z'))
+
+  interaction.reply({ content: 'Playing', ephemeral: true })
+})
+
+player.on('trackStart', async (node) => {
+  const channel = client.channels.cache.get(node.channelId)!
+  node.nowPlayingMessage = setTimeout(() => {
+    channel.send({ content: `Now playing: ${node.queue.current.title}` })
+  }, 2000)
 })

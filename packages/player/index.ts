@@ -1,1 +1,1 @@
-export { Music } from './src/Manager'
+export { Player } from './src/Player'

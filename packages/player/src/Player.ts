@@ -1,138 +1,174 @@
-import { Client, Guild, VoiceChannel } from 'discord.js'
-import { Source, Track, TrackPlayer, VoiceConnection } from 'yasha'
-import { Music } from './Manager'
-import { Queue } from './Queue'
+import { Client, Collection, Guild, VoiceChannel } from 'discord.js'
+import { EventEmitter } from 'node:events'
+import { Node } from './Node'
+import { Track } from 'yasha'
 
-interface PlayerCreateOptions {
-  defaultSource?: keyof typeof Source
-  manager: Music
-  voiceChannel: VoiceChannel
-  textChannel: string
-  volume?: number
-  guild: Guild
-}
+// export type MusicEvents = {
+//   trackStart: [player: Player, track: Track]
+//   trackEnd: [player: Player, track: Track]
+//   queueEnd: [player: Player, track: Track]
+// }
 
-type QueueStrategy = 'FIFO' | 'LIFO'
+export class Player extends EventEmitter {
+  client: Client
+  nodes: Collection<string, Node>
 
-type RepeatMode = 'off' | 'track' | 'queue'
+  // public emit<K extends keyof MusicEvents>(event: K, ...args: MusicEvents[K]): boolean;
 
-export class Player extends TrackPlayer {
-  public manager: Music
-  public playing: boolean
-  public volume: number
-  public stayInVoice: boolean
-  public queue: Queue
-  public voiceChannel: VoiceChannel
-  public textChannel: string
-  public leaveTimeout: NodeJS.Timeout | null
-  public guild: Guild
-  public connection: VoiceConnection | null
-  public defaultSource: keyof typeof Source
-  public nowPlayingMessage: any // TODO: Add correct type
-  public repeatMode: RepeatMode
-  public queueStrategy: QueueStrategy
-
-  constructor(options: PlayerCreateOptions) {
-    super({ external_encrypt: true, external_packet_send: true })
-    this.manager = options.manager
-    this.stayInVoice = false
-    this.playing = false
-    this.volume = options.volume ?? 100
-    this.queue = new Queue()
-    this.voiceChannel = options.voiceChannel
-    this.textChannel = options.textChannel
-    this.leaveTimeout = null
-    this.guild = options.guild
-    this.connection = null
-    this.defaultSource = options.defaultSource ?? 'Spotify' // TODO: add source to config
-    this.repeatMode = 'off'
-    this.queueStrategy = 'FIFO'
-
-    // if (this.manager.players.has(options.guild.id)) {
-    //   return this.manager.players.get(options.guild.id)
-    // }
+  constructor(client: Client, options: {}) {
+    super()
+    this.client = client
+    this.nodes = new Collection()
   }
 
-  async connect() {
-    this.connection = await VoiceConnection.connect(this.voiceChannel, {
-      selfDeaf: true,
+  async newPlayer(guild: Guild, voiceChannel: VoiceChannel, textChannel: string) {
+    // const dbOptions = await getPlayerOptionsFromDB(guild)
+    const node = new Node({
+      manager: this,
+      guild: guild,
+      voiceChannel: voiceChannel,
+      textChannel: textChannel,
     })
-    this.connection.subscribe(this)
-    this.connection.on('error', (e: any) => console.error(e))
-  }
-  disconnect() {
-    if (this.connection) this.connection.disconnect()
+
+    this.nodes.set(node.guild.id, node)
+
+    node.on('ready', () => {
+      this.trackStart(node)
+      console.log('ready')
+    })
+
+    node.on('finish', () => {
+      this.trackEnd(node)
+      console.log('finish')
+    })
+
+    // player.on(VoiceConnection.Status.Destroyed, () => {
+    //   if (player) player.destroy(true)
+    // })
+
+    // player.on('error', (err) => {
+    //   this.logger.error(`${player.queue.current.id} ${err} ${err.stack}`)
+    //   player.skip()
+
+    return node
   }
 
-  // stop() {
-  //   if (this.connection) {
-  //     super.destroy()
-  //     this.connection.destroy()
-  //     this.connection = null
-  //     this.manager.destroy(this.guild)
-  //   }
-  // }
+  trackStart(node: Node) {
+    node.playing = true
 
-  play(track?: Track) {
-    if (!track) {
-      if (!this.queue.current) return
-      super.play(this.queue.current)
-    } else {
-      super.play(track)
+    const track = node.queue.current
+    this.emit('trackStart', node, track)
+  }
+
+  trackEnd(node: Node) {
+    const track = node.queue.current
+    if (!track) return
+
+    if (node.repeatMode === 'track') {
+      this.emit('trackEnd', node, track)
+      node.play()
+      return
     }
-    if (this.leaveTimeout) clearTimeout(this.leaveTimeout)
-    if (!this.connection) this.connect()
 
-    this.leaveTimeout = null
-    super.start()
-    this.playing = true
-  }
-
-  playpause() {
-    if (this.queue.current && this.playing) {
-      super.stop()
-      this.playing = false
-      this.manager.trackStart(this)
-    }
-    if (this.queue.current && !this.playing) {
-      super.start()
-      this.playing = false
-      this.manager.queuePaused(this)
-    }
-  }
-
-  skip() {
-    this.manager.trackEnd(this, false)
-  }
-
-  skipTo(index: number) {
-    this.queue.slice(0, index)
-    this.manager.trackEnd(this, false)
-  }
-
-  setVolume(volume: number) {
-    super.setVolume(volume)
-  }
-
-  setRepeatMode(repeatMode: RepeatMode) {
-    this.repeatMode = repeatMode
-  }
-
-  async delete(force: boolean) {
-    try {
-      if (this.stayInVoice && !force) return
-
-      if (this.nowPlayingMessage) {
-        // if (this.nowPlayingMessageInterval) clearInterval(this.nowPlayingMessageInterval);
-        // eslint-disable-next-line no-empty-function
-        await this.nowPlayingMessage.edit({ components: [] }).catch(() => {})
+    if (node.repeatMode === 'queue') {
+      if (node.queueStrategy === 'FIFO') {
+        node.queue.add(track)
+        node.queue.current = node.queue.shift()
+      } else {
+        node.queue.add(track, 0)
+        node.queue.current = node.queue.pop()
       }
-      if (this.connection) this.disconnect()
-      super.destroy()
-
-      this.manager.players.delete(this.guild.id)
-    } catch (e) {
-      console.error(e)
+      this.emit('trackEnd', node, track)
+      node.play()
+      return
     }
+
+    if (node.queue.length) {
+      if (node.queueStrategy === 'FIFO') {
+        node.queue.current = node.queue.shift()
+      } else {
+        node.queue.current = node.queue.pop()
+      }
+      this.emit('trackEnd', node, track)
+      node.play()
+      return
+    }
+
+    if (!node.queue.length) {
+      this.emit('trackEnd', node, track)
+      node.stop()
+      node.queue.current = null
+      node.playing = false
+      return this.queueEnd(node, track)
+    }
+  }
+
+  queueEnd(node: Node, track: Track) {
+    if (!node.stayInVoice) {
+      node.leaveTimeout = setTimeout(() => {
+        node.stop()
+      }, 1000 * 60) // TODO: maybe add variable
+    }
+    this.emit('queueEnd', node, track)
+  }
+
+  queuePaused(node: Node) {
+    this.emit('queuePaused', node)
+  }
+
+  get(guildId: string) {
+    return this.nodes.get(guildId)
+  }
+
+  destroy(guildId: string) {
+    this.nodes.delete(guildId)
+  }
+
+  async search(query: string, requester: string, source: 'soundcloud' | 'spotify' | 'apple') {
+    let track
+
+    try {
+      switch (source) {
+        case 'soundcloud':
+          track = (await Source.Soundcloud.search(query))[0]
+          break
+        case 'spotify':
+          track = (await Source.Spotify.search(query))[0]
+          break
+        case 'apple':
+          track = (await Source.AppleMusic.search(query))[0]
+          break
+        default:
+          track = await Source.resolve(query)
+          break
+      }
+
+      if (!track || track.source == 'youtube') {
+        track = (await Source.Soundcloud.search(query))[0]
+        source = 'soundcloud'
+      }
+
+      if (!track) throw new Error('No track found')
+      else {
+        if (track instanceof TrackPlaylist) {
+          track.forEach((t) => {
+            t.requester = requester
+            t.icon = null
+            t.thumbnail = QueueHelper.reduceThumbnails(t.thumbnails)
+          })
+        } else {
+          track.requester = requester
+          track.icon = null
+          track.thumbnail = QueueHelper.reduceThumbnails(track.thumbnails)
+        }
+        return track
+      }
+    } catch (err) {
+      throw new Error(err)
+    }
+  }
+
+  getPlayingPlayers() {
+    return this.nodes.filter((p) => p.playing)
   }
 }
